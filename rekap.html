@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Tambahkan Chart.js untuk menggambar grafik -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rekap Laporan Nilai - Guru</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            margin: 20px; 
+            background: linear-gradient(rgba(240, 242, 245, 0.85), rgba(240, 242, 245, 0.85)), 
+                        url('https://i.postimg.cc/BZc2W6T6/Chat-GPT-Image-Jul-16-2026-01-12-18-AM.png') no-repeat center center fixed;
+            background-size: cover;
+        }
+
+        .container { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h2 { color: #2c3e50; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        
+        .filter-box { background: #e9ecef; padding: 15px; border-radius: 10px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
+        .filter-item { display: flex; flex-direction: column; gap: 5px; }
+        select { padding: 8px; border-radius: 5px; border: 1px solid #ccc; min-width: 150px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { background: #007bff; color: white; padding: 12px; font-size: 11px; text-transform: uppercase; }
+        td { padding: 10px; border-bottom: 1px solid #eee; text-align: center; font-size: 13px; }
+        tr:hover { background: #f1f8ff; }
+        
+        .skor-badge { font-weight: bold; color: #007bff; }
+        .total-badge { font-weight: bold; color: #28a745; background: #e6f4ea; padding: 4px 8px; border-radius: 4px; }
+        .rata-badge { font-weight: bold; color: #d9534f; background: #f9f2f4; padding: 4px 8px; border-radius: 4px; }
+        
+        .btn-action { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn-print { background: #28a745; color: white; }
+        .btn-back { background: #6c757d; color: white; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-size: 13px; }
+
+        /* Kelas untuk nama murid yang bisa diklik */
+        .klik-nama { color: #007bff; cursor: pointer; text-decoration: underline; font-weight: bold; }
+        .klik-nama:hover { color: #0056b3; }
+
+        /* Gaya untuk Kotak Pop-up (Modal) */
+        .modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.6); justify-content: center; align-items: center; z-index: 10000;
+        }
+        .modal-content {
+            background: white; padding: 25px; border-radius: 15px; width: 90%; max-width: 600px;
+            position: relative; box-shadow: 0 5px 25px rgba(0,0,0,0.2);
+        }
+        .close-btn {
+            position: absolute; top: 15px; right: 20px; font-size: 28px; font-weight: bold; 
+            cursor: pointer; color: #dc3545; line-height: 1;
+        }
+
+        @media print {
+            .filter-box, .btn-back, .btn-print, #loading-gate, .modal { display: none !important; }
+            body { margin: 0; background: white; }
+            .container { box-shadow: none; border: none; width: 100%; }
+        }
+
+        #loading-gate {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; display: flex; justify-content: center; align-items: center;
+            z-index: 9999; font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loading-gate">Mengecek Akses Guru...</div>
+
+    <div class="container" style="display: flex; justify-content: space-between; align-items: center; padding: 15px 25px;">
+        <a href="guru.html" class="btn-back">← Kembali ke Input</a>
+        <button class="btn-action btn-print" onclick="window.print()">📥 Cetak ke PDF</button>
+    </div>
+
+    <!-- KONTANINER GRAFIK KELAS -->
+    <div class="container">
+        <h2 style="margin-top: 0;">📈 Tren Rata-Rata Kelas</h2>
+        
+        <div class="filter-box">
+            <div class="filter-item">
+                <label style="font-size: 12px; font-weight: bold;">Filter Kelas:</label>
+                <select id="filterKelas" onchange="muatRekapUtama()">
+                    <option value="">-- Semua Kelas --</option>
+                </select>
+            </div>
+            <div class="filter-item">
+                <label style="font-size: 12px; font-weight: bold;">Tampilkan Tabel Untuk:</label>
+                <select id="filterTryout" onchange="renderTabel()">
+                    <option value="">-- Semua Try Out --</option>
+                </select>
+            </div>
+        </div>
+
+        <canvas id="grafikKelasCanvas" style="max-height: 300px;"></canvas>
+    </div>
+
+    <!-- KONTANINER TABEL DATA -->
+    <div class="container">
+        <h2 style="margin-top: 0;">📊 Rekap Nilai Murid</h2>
+        <p style="font-size: 13px; color: #666;">*Klik pada nama murid untuk melihat grafik perkembangan individu.</p>
+        
+        <div style="overflow-x: auto;">
+            <table id="tabelRekap">
+                <thead><tr id="headTabel"></tr></thead>
+                <tbody id="bodyTabel"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- MODAL POP-UP GRAFIK MURID -->
+    <div id="modalMurid" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="tutupModal()">&times;</span>
+            <h3 id="namaDetailMurid" style="color: #007bff; margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px;">Nama Murid</h3>
+            <p style="font-weight: bold; color: #555;">Rata-Rata Keseluruhan: <span id="rataKeseluruhanMurid" class="rata-badge" style="font-size: 16px;">0</span></p>
+            <canvas id="grafikMuridCanvas" style="max-height: 250px; margin-top: 20px;"></canvas>
+        </div>
+    </div>
+
+<script>
+    const supabaseUrl = 'https://vjoikcjirqjmossebkuq.supabase.co'; 
+    const supabaseKey = 'sb_publishable_zzXyepP2HphkZHu27-LNvg_cX0DBGS1'; 
+    const _supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+    // Variabel Global untuk menyimpan data agar tidak bolak-balik ke database
+    let dataEvaluasiGlobal = [];
+    let listMateriGlobal = [];
+    let listTryoutGlobal = [];
+    
+    // Variabel grafik
+    let chartKelas = null;
+    let chartMurid = null;
+    
+    const bobotHuruf = { 'A': 95, 'B': 85, 'C': 75, 'D': 65, 'E': 50 };
+
+    window.onload = async function() {
+        try {
+            const { data: { session } } = await _supabase.auth.getSession();
+            if (!session) {
+                window.location.href = "login.html";
+                return;
+            }
+            document.getElementById('loading-gate').style.display = 'none';
+            await muatDaftarDropdown();
+            muatRekapUtama();
+        } catch (err) {
+            window.location.href = "login.html";
+        }
+    };
+
+    async function muatDaftarDropdown() {
+        // Muat Kelas
+        const { data: kelasData } = await _supabase.from('kelas').select('nama_kelas').order('nama_kelas', { ascending: true });
+        if (kelasData) {
+            document.getElementById('filterKelas').innerHTML = '<option value="">-- Semua Kelas --</option>' + 
+                kelasData.map(k => `<option value="${k.nama_kelas}">${k.nama_kelas}</option>`).join('');
+        }
+
+        // Muat Try Out untuk Filter Tabel
+        const { data: tryoutData } = await _supabase.from('tryout').select('nama_tryout').order('nama_tryout', { ascending: true });
+        if (tryoutData) {
+            document.getElementById('filterTryout').innerHTML = '<option value="">-- Semua Try Out --</option>' + 
+                tryoutData.map(t => `<option value="${t.nama_tryout}">${t.nama_tryout}</option>`).join('');
+        }
+    }
+
+    // Fungsi Utama Penarik Data
+    async function muatRekapUtama() {
+        const kelasDipilih = document.getElementById('filterKelas').value;
+        document.getElementById('bodyTabel').innerHTML = "<tr><td colspan='100%'>Memuat data...</td></tr>";
+
+        try {
+            // Ambil daftar materi
+            const { data: materiData } = await _supabase.from('materi').select('nama_materi');
+            listMateriGlobal = materiData.map(m => m.nama_materi.toLowerCase());
+
+            // Siapkan Header Tabel
+            let headerHTML = "<th>Periode</th><th>Kelas</th><th>NI</th><th>Nama Murid</th>";
+            listMateriGlobal.forEach(m => { headerHTML += `<th>${m.toUpperCase()}</th>`; });
+            headerHTML += "<th>TOTAL</th><th>RATA2</th>";
+            document.getElementById('headTabel').innerHTML = headerHTML;
+
+            // Ambil semua data evaluasi berdasarkan kelas yang difilter
+            let query = _supabase.from('evaluasi').select('*');
+            if (kelasDipilih) query = query.eq('kelas', kelasDipilih);
+            
+            const { data: evaluasiData, error } = await query;
+            if (error) throw error;
+
+            dataEvaluasiGlobal = evaluasiData || [];
+
+            // Ekstrak daftar Try Out unik dari data evaluasi dan urutkan
+            listTryoutGlobal = [...new Set(dataEvaluasiGlobal.map(d => d.nama_tryout || "Evaluasi Harian"))];
+            listTryoutGlobal.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+            // Eksekusi Render
+            renderGrafikKelas();
+            renderTabel();
+
+        } catch (err) {
+            alert("Gagal memuat rekap: " + err.message);
+        }
+    }
+
+    // Fungsi Menggambar Grafik Kelas
+    function renderGrafikKelas() {
+        const rataKelasPerTO = [];
+
+        listTryoutGlobal.forEach(to => {
+            const dataTO = dataEvaluasiGlobal.filter(d => (d.nama_tryout || "Evaluasi Harian") === to);
+            
+            if (dataTO.length === 0) {
+                rataKelasPerTO.push(0);
+                return;
+            }
+
+            let totalNilai = 0;
+            let jumlahData = 0;
+
+            dataTO.forEach(d => {
+                let skor = d.skor;
+                let angka = isNaN(skor) ? (bobotHuruf[skor.toUpperCase()] || 0) : parseFloat(skor);
+                totalNilai += angka;
+                jumlahData++;
+            });
+
+            let rata = jumlahData > 0 ? (totalNilai / jumlahData).toFixed(1) : 0;
+            rataKelasPerTO.push(parseFloat(rata));
+        });
+
+        const ctx = document.getElementById('grafikKelasCanvas').getContext('2d');
+        if (chartKelas) chartKelas.destroy();
+
+        chartKelas = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: listTryoutGlobal,
+                datasets: [{
+                    label: 'Rata-Rata Kelas',
+                    data: rataKelasPerTO,
+                    borderColor: '#28a745', // Warna hijau untuk kelas
+                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                    borderWidth: 3, pointRadius: 5, fill: true, tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, max: 100 } }
+            }
+        });
+    }
+
+    // Fungsi Merender Tabel
+    function renderTabel() {
+        const toDipilih = document.getElementById('filterTryout').value;
+        const bodyTabel = document.getElementById('bodyTabel');
+
+        // Filter data berdasarkan Dropdown Try Out (jika ada)
+        let dataTabel = dataEvaluasiGlobal;
+        if (toDipilih) {
+            dataTabel = dataTabel.filter(d => (d.nama_tryout || "Evaluasi Harian") === toDipilih);
+        }
+
+        if (dataTabel.length === 0) {
+            bodyTabel.innerHTML = "<tr><td colspan='100%'>Tidak ada data untuk filter ini.</td></tr>";
+            return;
+        }
+
+        // Pengelompokan Data per Try Out & Murid
+        const grupData = {};
+        dataTabel.forEach(row => {
+            const to = row.nama_tryout || "Evaluasi Harian";
+            const key = `${to}_${row.nomor_induk}`;
+            
+            if (!grupData[key]) {
+                grupData[key] = { to: to, kelas: row.kelas, ni: row.nomor_induk, nama: row.nama, nilai: {} };
+            }
+            grupData[key].nilai[row.nama_materi.toLowerCase()] = row.skor;
+        });
+
+        // Urutkan tabel: Pertama berdasarkan Try Out, Kedua berdasarkan Nama Murid
+        const sortedKeys = Object.keys(grupData).sort((a, b) => {
+            const toA = grupData[a].to;
+            const toB = grupData[b].to;
+            if (toA !== toB) return toA.localeCompare(toB, undefined, { numeric: true });
+            return grupData[a].nama.localeCompare(grupData[b].nama);
+        });
+
+        bodyTabel.innerHTML = sortedKeys.map(k => {
+            const mrd = grupData[k];
+            
+            // Nama murid diubah menjadi link yang memanggil fungsi bukaDetail
+            let baris = `
+                <td><span style="background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">${mrd.to}</span></td>
+                <td><small>${mrd.kelas || '-'}</small></td>
+                <td>${mrd.ni}</td>
+                <td style='text-align:left'>
+                    <span class="klik-nama" onclick="bukaDetail('${mrd.ni}', '${mrd.nama.replace(/'/g, "\\'")}')">${mrd.nama}</span>
+                </td>`;
+            
+            let total = 0;
+            let jumlah = 0;
+
+            listMateriGlobal.forEach(m => {
+                let skor = mrd.nilai[m] || "-";
+                baris += `<td><span class="skor-badge">${skor}</span></td>`;
+
+                if (skor !== "-") {
+                    let angka = isNaN(skor) ? (bobotHuruf[skor.toUpperCase()] || 0) : parseFloat(skor);
+                    total += angka;
+                    jumlah++;
+                }
+            });
+
+            let rata = jumlah > 0 ? (total / jumlah).toFixed(1) : 0;
+            baris += `<td><span class="total-badge">${total}</span></td><td><span class="rata-badge">${rata}</span></td>`;
+            
+            return `<tr>${baris}</tr>`;
+        }).join('');
+    }
+
+    // FUNGSI UNTUK MEMBUKA MODAL DAN MENGGAMBAR GRAFIK INDIVIDU
+    function bukaDetail(ni, namaMurid) {
+        document.getElementById('namaDetailMurid').innerText = "Grafik Perkembangan: " + namaMurid;
+        document.getElementById('modalMurid').style.display = 'flex';
+
+        // Filter data khusus untuk murid ini
+        const dataMurid = dataEvaluasiGlobal.filter(d => d.nomor_induk === ni);
+        
+        const rataMuridPerTO = [];
+        let totalSeluruhSkor = 0;
+        let jumlahSeluruhMateri = 0;
+
+        // Hitung rata-rata per Try Out untuk grafik
+        listTryoutGlobal.forEach(to => {
+            const dataTO = dataMurid.filter(d => (d.nama_tryout || "Evaluasi Harian") === to);
+            
+            if (dataTO.length === 0) {
+                rataMuridPerTO.push(null); // Gunakan null agar garis grafik terputus jika tidak ikut Try Out
+                return;
+            }
+
+            let totalNilai = 0;
+            let jumlahData = 0;
+
+            dataTO.forEach(d => {
+                let skor = d.skor;
+                let angka = isNaN(skor) ? (bobotHuruf[skor.toUpperCase()] || 0) : parseFloat(skor);
+                
+                // Untuk rata-rata per TO
+                totalNilai += angka;
+                jumlahData++;
+                
+                // Untuk grand total keseluruhan
+                totalSeluruhSkor += angka;
+                jumlahSeluruhMateri++;
+            });
+
+            let rata = jumlahData > 0 ? (totalNilai / jumlahData).toFixed(1) : 0;
+            rataMuridPerTO.push(parseFloat(rata));
+        });
+
+        // Tampilkan Rata-Rata Grand Total
+        let rataTotalAll = jumlahSeluruhMateri > 0 ? (totalSeluruhSkor / jumlahSeluruhMateri).toFixed(1) : 0;
+        document.getElementById('rataKeseluruhanMurid').innerText = rataTotalAll;
+
+        // Render Grafik Murid
+        const ctx = document.getElementById('grafikMuridCanvas').getContext('2d');
+        if (chartMurid) chartMurid.destroy();
+
+        chartMurid = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: listTryoutGlobal,
+                datasets: [{
+                    label: 'Rata-Rata Murid',
+                    data: rataMuridPerTO,
+                    borderColor: '#007bff', // Warna biru untuk murid
+                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                    borderWidth: 3, pointRadius: 6, fill: true, tension: 0.3,
+                    spanGaps: true // Garis menyambung otomatis meski ada TO yang bolong
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, max: 100 } }
+            }
+        });
+    }
+
+    // Fungsi untuk menutup Pop-up Modal
+    function tutupModal() {
+        document.getElementById('modalMurid').style.display = 'none';
+    }
+
+    // Menutup modal jika layar di luar kotak putih diklik
+    window.onclick = function(event) {
+        const modal = document.getElementById('modalMurid');
+        if (event.target === modal) {
+            modal.style.display = "none";
+        }
+    }
+</script>
+</body>
+</html>
